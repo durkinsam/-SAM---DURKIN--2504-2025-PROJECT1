@@ -1,7 +1,5 @@
 # src/utils/pretty_print.jl
-# Human-friendly printing for PolynomialDense
-
-# Try common ways to fetch coefficients (a0, a1, a2, ... low→high)
+# Try common ways to fetch coefficients (a0, a1, a2, ... low to high)
 function coeffvec(p)
     if hasproperty(p, :coeffs)
         return getproperty(p, :coeffs)     # p.coeffs
