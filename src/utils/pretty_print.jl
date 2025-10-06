@@ -1,7 +1,6 @@
 # src/utils/pretty_print.jl
-# Human-friendly printing for PolynomialDense
 
-# --- helper to get coefficient vector ---
+#helper to get coefficient vector
 # Adjust this if your type uses a different field/function name.
 coeffvec(p) = hasproperty(p, :coeffs)        ? getproperty(p, :coeffs) :
               (@isdefined coefficients &&
