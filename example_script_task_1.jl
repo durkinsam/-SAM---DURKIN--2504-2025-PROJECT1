@@ -1,6 +1,5 @@
 cd(@__DIR__)                     # ensures relative paths work
 include("poly_factorization_project.jl")  # loads the main module
-using .PolynomialDefinitions   # this exposes Term, PolynomialDense, etc.
 # example_script_task_1.jl
 # Demonstrates construction, basic ops, derivative product rule,
 # modular division, and gcd over F_p.
