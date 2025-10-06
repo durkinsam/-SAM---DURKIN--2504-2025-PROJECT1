@@ -37,5 +37,6 @@ include("src/polynomial_definitions/polynomial_dense.jl")
     include("src/basic_polynomial_operations/dense/polynomial_gcd.jl")
 
 include("src/polynomial_factorization/factor.jl")
+include("src/utils/pretty_print.jl")
 
 nothing
