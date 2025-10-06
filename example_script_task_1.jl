@@ -1,5 +1,6 @@
 cd(@__DIR__)                     # ensures relative paths work
 include("poly_factorization_project.jl")  # loads the main module
+using .PolynomialDefinitions   # this exposes Term, PolynomialDense, etc.
 # example_script_task_1.jl
 # Demonstrates construction, basic ops, derivative product rule,
 # modular division, and gcd over F_p.
@@ -9,10 +10,15 @@ println("== Task 1 example script ==")
 
 # 1) Construct at least 3 polynomials with the given constructor.
 #    In most templates, PolynomialDense takes a coefficient vector
-#    [a0, a1, a2, ...] meaning a0 + a1*x + a2*x^2 + ...
-f = PolynomialDense([1, -2, 3])       # f(x) = 1 - 2x + 3x^2
-g = PolynomialDense([0, 5, 1])        # g(x) = 5x + x^2
-h = PolynomialDense([7, 0, 0, 1])     # h(x) = 7 + x^3
+# f(x) = 1 - 2x + 3x^2
+f = PolynomialDense([Term(1,0), Term(-2,1), Term(3,2)])
+
+# g(x) = 5x + x^2
+g = PolynomialDense([Term(5,1), Term(1,2)])
+
+# h(x) = 7 + x^3
+h = PolynomialDense([Term(7,0), Term(1,3)])
+
 
 @show f
 @show g
