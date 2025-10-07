@@ -3,115 +3,125 @@
 # We construct 5 explicit polynomial-addition examples whose coefficients overflow
 # if stored as Int, then re-run the same additions with BigInt coefficients.
 
+# Load your project code (adjust this path/name if yours differs)
 cd(@__DIR__)
 include("poly_factorization_project.jl")
 
-# --- If your types live directly in Main (as in your repo), no `using .Module` is needed. ---
+# ──────────────────────────────────────────────────────────────────────────────
+# Utilities (generic; use only the public interface: Term, PolynomialDense, +)
+# ──────────────────────────────────────────────────────────────────────────────
 
-# Convenience: construct polynomials from (coef, degree) pairs
-# Using Int coefficients:
-poly_int(pairs) = PolynomialDense([Term(Int(c), d) for (c, d) in pairs])
-# Using BigInt coefficients:
-poly_big(pairs) = PolynomialDense([Term(BigInt(c), d) for (c, d) in pairs])
+# Build a PolynomialDense{C,D} from (coef,deg) pairs (deg are plain Ints)
+makeP(::Type{C}, ::Type{D}, pairs::Vector{Tuple{<:Integer,<:Integer}}) where {C,D} =
+    PolynomialDense{C,D}(Term{C,D}[ Term{C,D}(convert(C,c), convert(D,d)) for (c,d) in pairs ])
 
-# Helper to detect when Int arithmetic overflowed (wraparound)
-function coef_overflowed(x::Int, y::Int)
-    intsum  = x + y                   # possibly wrapped
-    bigsum  = BigInt(x) + BigInt(y)   # exact
-    return BigInt(intsum) != bigsum   # true => overflow happened
+# Materialize a coefficient vector (a₀, a₁, …, a_deg) from any Polynomial{C,D}
+function coeffvec(p)::Vector
+    # Determine length from leading degree
+    ld = leading(p)                  # Term{C,D}
+    D  = typeof(ld.degree)
+    C  = typeof(ld.coeff)
+    deg = Int(ld.degree)
+    v = [zero(C) for _ in 0:deg]
+    # Fill from the iterator of non-zero terms
+    for t in p
+        v[Int(t.degree)+1] = t.coeff
+    end
+    return v
 end
 
-# Pretty print a comparison block
-function show_example(id, Fint, Gint, Fbig, Gbig)
-    println("\n=== Example $id ===")
+# Lift a coefficient vector to BigInt for safe comparison
+bigvec(v) = BigInt[ big(x) for x in v ]
 
-    # Int addition
-    Hint = Fint + Gint
+# Pretty printer for one example
+function show_example(label::String, Pint, Qint, Pbig, Qbig)
+    println("\n", "─"^80)
+    println(label)
+    println("─"^80)
 
-    # BigInt addition
-    Hbig = Fbig + Gbig
+    # Compute sums
+    Rint = Pint + Qint
+    Rbig = Pbig + Qbig
 
-    println("-- Int coefficients (may overflow) --")
-    @show Fint
-    @show Gint
-    @show Hint
+    # Show polynomials
+    println("[Int]  p(x) = ", Pint)
+    println("[Int]  q(x) = ", Qint)
+    println("[Int]  p(x)+q(x) = ", Rint, "   (⚠ may overflow)")
 
-    println("-- BigInt coefficients (exact) --")
-    @show Fbig
-    @show Gbig
-    @show Hbig
+    println("[Big]  p(x) = ", Pbig)
+    println("[Big]  q(x) = ", Qbig)
+    println("[Big]  p(x)+q(x) = ", Rbig, "   (✓ exact)")
 
-    # Try to flag any coefficient positions that overflowed
-    # We compare coefficient vectors term-by-term by degree.
-    # (Both constructors put the same degrees in the same places.)
-    try
-        # Grab raw coeff vectors if the field is available.
-        cint = getfield(Hint, :coeffs)
-        cbig = getfield(Hbig, :coeffs)
-        # Only compare where both have entries
-        L = min(length(cint), length(cbig))
-        any_overflow = false
-        for i in 1:L
-            x = cint[i]
-            y = Int(cbig[i] % typemax(Int))  # only used to keep type stable
-            # Detect overflow by recomputing Int-sum from the original addends termwise.
-            # We need the addends' coeffs to do this.
+    # Compare coefficient vectors safely (lift Int→BigInt)
+    cint = coeffvec(Rint)
+    cbig = coeffvec(Rbig)
+    cint_big = bigvec(cint)
+
+    # Align lengths
+    L = max(length(cint_big), length(cbig))
+    resize!(cint_big, L; init=big(0))
+    resize!(cbig, L; init=zero(eltype(cbig)))
+
+    # Detect mismatch == evidence of overflow/wrap
+    mismatch_positions = Int[]
+    for i in 1:L
+        if cint_big[i] != cbig[i]
+            push!(mismatch_positions, i-1)  # degree = index-1
         end
-    catch
-        # If your type hides coeffs, skip detection (the printed mismatch still shows it).
     end
 
-    println("Matches (Int result == BigInt result converted to Int)? ",
-            try
-                # Convert Hbig to Int if possible (will throw if out-of-range)
-                Hbig_int = PolynomialDense([Term(Int(c), i-1) for (i, c) in enumerate(getfield(Hbig, :coeffs))])
-                Hint == Hbig_int
-            catch
-                false
-            end)
+    println("[Int] coeffs: ", cint)
+    println("[Big] coeffs: ", cbig)
+    println("Overflow detected at degrees: ",
+            isempty(mismatch_positions) ? "none" : string(mismatch_positions))
 end
 
-println("== Task 2: Why we need BigInt for exact integer polynomials ==")
+# ──────────────────────────────────────────────────────────────────────────────
+# Examples (explicit, no randomness). Only coefficients are large; degrees small
+# ──────────────────────────────────────────────────────────────────────────────
 
-# Shorthands for huge values on 64-bit Int
-const I_MAX = typemax(Int)         #  9223372036854775807 on 64-bit
-const I_MIN = typemin(Int)         # -9223372036854775808
+const I_MAX = typemax(Int)      #  9223372036854775807 on 64-bit
+const I_MIN = typemin(Int)      # -9223372036854775808
 
-# Five explicit examples (no rand). Only coefficients are large; degrees small.
-# Each pair is [(coef, deg), ...]  meaning coef * x^deg
-
-# 1) Overflow at constant term: (I_MAX - 5) + (10)  --> wraps as Int
-ex1_f = [(I_MAX - 5, 0)]
-ex1_g = [(10, 0)]
-
-# 2) Overflow at x^2: 6e18 + 6e18
-ex2_f = [(6_000_000_000_000_000_000, 2)]
-ex2_g = [(6_000_000_000_000_000_000, 2)]
-
-# 3) Underflow (negative overflow) at constant term: (I_MIN + 5) + (-10)
-ex3_f = [(I_MIN + 5, 0)]
-ex3_g = [(-10, 0)]
-
-# 4) Mixed degrees; one term safe, one term overflows at x
-ex4_f = [(50, 0), (I_MAX - 1, 1)]
-ex4_g = [(75, 0), (100, 1)]
-
-# 5) Multi-term; overflow at x^3, underflow at x
+# Each example is a pair of vectors of (coef, degree)
+ex1_f = [(I_MAX - 5, 0)];                   ex1_g = [(10, 0)]                       # overflow at constant
+ex2_f = [(6_000_000_000_000_000_000, 2)];   ex2_g = [(6_000_000_000_000_000_000, 2)]# overflow at x^2
+ex3_f = [(I_MIN + 5, 0)];                   ex3_g = [(-10, 0)]                      # negative overflow
+ex4_f = [(50, 0), (I_MAX - 1, 1)];          ex4_g = [(75, 0), (100, 1)]             # mix; overflow at x
 ex5_f = [(I_MAX - 2, 3), (I_MIN + 10, 1), (12345, 0)]
-ex5_g = [(100, 3),       (-50,        1), (67890, 0)]
+ex5_g = [(100,       3), (-50,        1), (67890, 0)]                                # overflow at x^3 & x
 
 examples = [
-    (ex1_f, ex1_g),
-    (ex2_f, ex2_g),
-    (ex3_f, ex3_g),
-    (ex4_f, ex4_g),
-    (ex5_f, ex5_g),
+    ("Example 1 — positive overflow at constant term", ex1_f, ex1_g),
+    ("Example 2 — large equal terms overflow at x^2",  ex2_f, ex2_g),
+    ("Example 3 — negative overflow at constant",      ex3_f, ex3_g),
+    ("Example 4 — mixed degrees; overflow at x",       ex4_f, ex4_g),
+    ("Example 5 — multi-term; wraps at x^3 and x",     ex5_f, ex5_g),
 ]
 
-for (i, (pf, pg)) in enumerate(examples)
-    Fint = poly_int(pf);  Gint = poly_int(pg)
-    Fbig = poly_big(pf);  Gbig = poly_big(pg)
-    show_example(i, Fint, Gint, Fbig, Gbig)
+println("\n=== Task 2: Int vs BigInt overflow demonstration ===")
+
+for (label, pf, pg) in examples
+    # Int,Int polynomials (will wrap)
+    Fint = makeP(Int,    Int, pf)
+    Gint = makeP(Int,    Int, pg)
+    # BigInt,Int polynomials (exact)
+    Fbig = makeP(BigInt, Int, pf)
+    Gbig = makeP(BigInt, Int, pg)
+    show_example(label, Fint, Gint, Fbig, Gbig)
 end
 
-println("\n== End Task 2 ==")
+# A pure BigInt scale example (orders of magnitude beyond Int)
+println("\n", "─"^80)
+println("Example 6 — truly huge BigInt coefficients (no Int counterpart)")
+println("─"^80)
+Pbig = makeP(BigInt, Int, [(big"10"^40,0), (-big"10"^35,1), (big"10"^30,2)])
+Qbig = makeP(BigInt, Int, [(big"10"^40,0), ( big"10"^35,1), (-big"10"^25,2)])
+Rbig = Pbig + Qbig
+println("[Big] P(x)+Q(x) = ", Rbig)
+println("[Big] coeffs: ", coeffvec(Rbig))
+
+println("\n=== End Task 2 ===\n")
+
+# Tip to capture output for PDF:
+# julia --project=. example_script_task_2.jl | tee overflow_demo_output.txt
