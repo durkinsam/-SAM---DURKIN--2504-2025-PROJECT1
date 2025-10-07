@@ -11,6 +11,7 @@ Pkg.activate(".")
 
 include("../poly_factorization_project.jl")
 include("power_test.jl")
+include("z_mod_p.jl")
 ####
 # Execute unit tests for integers
 ###
