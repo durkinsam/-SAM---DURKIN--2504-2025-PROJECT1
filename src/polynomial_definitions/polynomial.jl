@@ -377,15 +377,43 @@ function mod(f::P, p::Int)::P where {P <: Polynomial}
 end
 
 """
-Power of a polynomial mod prime.
+Power of a polynomial mod prime. Task 7
 """
-function pow_mod(p::P, n::Int, prime::Int) where {P <: Polynomial}
-    n < 0 && error("No negative power")
+# Fast pow_mod by repeated squaring (abstract; works for Dense & Sparse)
+function pow_mod(p::P, n::Integer, prime::Integer) where {C,D,P<:Polynomial{C,D}}
+    n < 0 && throw(ArgumentError("No negative power"))
 
-    out = one(p)
-    for _ in 1:n
-        out *= p
-        out = mod(out, prime)
+    # O(1) special cases
+    if n == 0
+        return one(P)                       # 1
+    elseif iszero(p)
+        return zero(P)                      # 0^n = 0 (n>0)
+    elseif degree(p) == zero(D) && leading(p).coeff == one(C)
+        return one(P)                       # 1^n = 1
+    else
+        # x ?
+        it = iterate(p)
+        if it !== nothing
+            t, st = it
+            if t.coeff == one(C) && t.degree == one(D) && iterate(p, st) === nothing
+                return P([Term{C,D}(one(C), convert(D, n))])  # x^n
+            end
+        end
     end
-    return out
+
+    # repeated squaring with modulo at each step
+    res  = one(P)
+    base = mod(p, prime)
+    e = n
+    while e > 0
+        if (e & 1) == 1
+            res = mod(res * base, prime)
+        end
+        e >>= 1
+        if e > 0
+            base = mod(base * base, prime)
+        end
+    end
+    return res
 end
+
