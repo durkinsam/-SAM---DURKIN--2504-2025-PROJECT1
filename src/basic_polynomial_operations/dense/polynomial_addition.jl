@@ -16,64 +16,45 @@
 Add a dense polynomial and a term (functional).
 Merges at degree = t.degree and trims trailing zeros.
 """
+# p + term  (functional)
 function Base.:+(p::PolynomialDense{C,D}, t::Term{C,D}) where {C,D}
     iszero(t) && return p
     q = deepcopy(p)
-    idx = Int(t.degree) + 1                # array indices are Int
+    idx = Int(t.degree) + 1
     if idx > length(q.terms)
-        # grow with zero terms up to idx
+        # grow with zero terms up to idx-1, then push t
         zt = Term{C,D}(zero(C), zero(D))
-        append!(q.terms, fill(zt, idx - length(q.terms) - 0))
+        while length(q.terms) < idx - 1
+            push!(q.terms, zt)
+        end
         push!(q.terms, t)
     else
-        # merge at that slot
-        if !iszero(q.terms[idx])
-            q.terms[idx] = q.terms[idx] + t
-        else
-            q.terms[idx] = t
-        end
+        q.terms[idx] = iszero(q.terms[idx]) ? t : (q.terms[idx] + t)
     end
     return trim!(q)
 end
 
-# Term + PolynomialDense (commutative)
+# term + p
 Base.:+(t::Term{C,D}, p::PolynomialDense{C,D}) where {C,D} = p + t
 
-"""
-In-place add a term (mutating).
-"""
-function Base.:+=(p::PolynomialDense{C,D}, t::Term{C,D}) where {C,D}
-    iszero(t) && return p
-    idx = Int(t.degree) + 1
-    if idx > length(p.terms)
-        zt = Term{C,D}(zero(C), zero(D))
-        append!(p.terms, fill(zt, idx - length(p.terms) - 0))
-        push!(p.terms, t)
-    else
-        p.terms[idx] = iszero(p.terms[idx]) ? t : (p.terms[idx] + t)
-    end
-    trim!(p)
-end
-
-"""
-Add an integer constant to a dense polynomial.
-(Converts n to coefficient type C and uses degree zero of type D.)
-"""
+# p + integer (constant)
 Base.:+(p::PolynomialDense{C,D}, n::Integer) where {C,D} =
     p + Term{C,D}(convert(C, n), zero(D))
-Base.:+(n::Integer, p::PolynomialDense{C,D}) where {C,D} =
-    p + n
+Base.:+(n::Integer, p::PolynomialDense{C,D}) where {C,D} = p + n
 
-# (Optional) If you want a fast dense+dense path (otherwise abstract fallback is fine):
+# (optional fast p+q; abstract fallback also works)
 # function Base.:+(p::PolynomialDense{C,D}, q::PolynomialDense{C,D})::PolynomialDense{C,D} where {C,D}
-#     np, nq = length(p.terms), length(q.terms)
-#     L = max(np, nq)
+#     L = max(length(p.terms), length(q.terms))
 #     zt = Term{C,D}(zero(C), zero(D))
-#     vt = Vector{Term{C,D}}(undef, L)
-#     @inbounds for i in 1:L
-#         tp = (i <= np) ? p.terms[i] : zt
-#         tq = (i <= nq) ? q.terms[i] : zt
-#         vt[i] = tp + tq
+#     vt = Term{C,D}[]
+#     sizehint!(vt, L)
+#     for i in 1:L
+#         tp = i <= length(p.terms) ? p.terms[i] : zt
+#         tq = i <= length(q.terms) ? q.terms[i] : zt
+#         s = tp + tq
+#         iszero(s) || push!(vt, s)
 #     end
-#     return trim!(PolynomialDense{C,D}(vt))
+#     isempty(vt) && push!(vt, zt)
+#     return PolynomialDense{C,D}(vt)
 # end
+
