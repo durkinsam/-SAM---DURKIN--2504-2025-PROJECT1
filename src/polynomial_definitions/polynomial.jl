@@ -14,7 +14,6 @@
 """
 An abstract `Polynomial` type, acting as the supertype for all implementations of a polynomial.
 
-
 Introduction:
 The functions defined in this file, and in the folder src/basic_polynomial_operations/abstract
 provide an interface for any subtype of Polynomial. Some operations (e.g. *) can 
@@ -39,7 +38,8 @@ We assume that at least the following two constructors exist for a given concret
 We assume also that for any concrete subtype of Polynomial, no zero term is stored with degree higher
 than the leading term (ie, we do not store 1 + 2x + x^2 + 0x^3 + 0x^7)
 """
-abstract type Polynomial end
+abstract type Polynomial{C,D} end
+
 
 """
 This function maintains the invariant of the Polynomial type so that there are no zero terms beyond the highest
