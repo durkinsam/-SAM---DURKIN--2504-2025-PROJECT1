@@ -27,95 +27,86 @@ TODO (Task 7)
     function for C <: Integer and implement the Chinese Remainder Theorem (CRT).
 
 =#
+using .ZModPField: ZModP
 
-
-"""
-Returns the factors of `f` in an array of tuples (g, n).
-NOTE: Override this in Task 6 for Zp[x] and in Task 7 for Z[x].
-"""
-function factor(::Type{C}, f::P)::Vector{Tuple{P, Integer}} where {C,D,P<:Polynomial{C,D}}
-    not_implemented_error(f, "factor")
+# ---------- helpers: rebuild same concrete poly type with new coeff type ----
+@generated function _rebuild_like(p::P, ::Type{C2}, terms::Vector{Term{C2,D}}) where {C2,D,P<:Polynomial{<:Any,D}}
+    head = :( $(Expr(:quote, :(typeof(p).name.wrapper))) )
+    :( $head{C2,D}(terms) )
 end
 
-"""
-Returns (q, r) for num ÷ den.
-NOTE: Override this in Task 6 for Zp[x].
-"""
-function div_rem(::Type{C}, num::P, den::P)::Tuple{P,P} where {C,D,P<:Polynomial{C,D}}
-    not_implemented_error(num, "div_rem")
+# Converters between rings (used when we reuse existing *_mod_p code)
+"Int/BigInt → ZModP coefficients"
+function to_zp_poly(p::P, ::Type{Z}) where {C<:Integer,D,P<:Polynomial{C,D},T<:Integer,N,Z<:ZModP{T,N}}
+    vt = Term{Z,D}[ Term{Z,D}(Z(t.coeff), t.degree) for t in p ]
+    _rebuild_like(p, Z, vt)
 end
 
-"""
-Distinct degree factorization.
-NOTE: Override this in Task 6 for Zp[x].
-"""
-function dd_factor(::Type{C}, f::P)::Array{P} where {C,D,P<:Polynomial{C,D}}
-    not_implemented_error(f, "dd_factor")
+"ZModP → Int/BigInt coefficients (choose target Int type T2)"
+function to_int_poly(p::P, ::Type{T2}) where {T2<:Integer,D,T<:Integer,N,P<:Polynomial{ZModP{T,N},D}}
+    vt = Term{T2,D}[ Term{T2,D}(T2(t.coeff.val), t.degree) for t in p ]
+    _rebuild_like(p, T2, vt)
 end
 
-"""
-Distinct degree split.
-NOTE: Override this in Task 6 for Zp[x].
-"""
-function dd_split(::Type{C}, f::P, d::Integer)::Vector{P} where {C,D,P<:Polynomial{C,D}}
-    not_implemented_error(f, "dd_split")
-end
+# extract the modulus N from the coefficient type
+_modulus(::Type{ZModP{T,N}}) where {T,N} = N
+
+# ======================= REQUIRED API (Task 6) ==============================
 
 """
-Quotient only.
+div_rem(::Type{ZModP{T,N}}, num, den) over Zp[x].
+Returns (q,r) with num = q*den + r and deg(r) < deg(den) or r=0.
 """
-div(::Type{C}, num::P, den::P) where {C,D,P<:Polynomial{C,D}} = first(div_rem(C, num, den))
-
-"""
-Remainder only.
-"""
-rem(::Type{C}, num::P, den::P) where {C,D,P<:Polynomial{C,D}} = last(div_rem(C, num, den))
-
-"""
-Extended Euclid (generic over a field C).
-"""
-function extended_euclid_alg(::Type{C}, f::P, g::P) where {C,D,P<:Polynomial{C,D}}
-    return ext_euclid_alg(f, g, rem, div)
-end
-
-"""
-Greatest common divisor.
-"""
-gcd(::Type{C}, f::P, g::P) where {C,D,P<:Polynomial{C,D}} =
-    extended_euclid_alg(C, f, g) |> first
-
-"""
-Yun's algorithm: square-free part over a perfect field C.
-"""
-function square_free(::Type{C}, f::P) where {C,D,P<:Polynomial{C,D}}
-    # Remove minimum degree (in case char(C) != 0)
-    min_deg = last(f).degree
-    vt = filter(t -> !iszero(t), collect(f))
-    # Ensure we rebuild with Term{C,D} so degrees/coeffs keep their param types
-    shifted_terms = map(t -> Term{C,D}(t.coeff, t.degree - min_deg), vt)
-    f = P(shifted_terms)
-
-    # Compute the gcd of f, f'
-    der_f = derivative(f)
-    sqr_part = gcd(C, f, der_f)
-
-    iszero(sqr_part) && return f * (min_deg > zero(min_deg) ? x_poly(P) : one(P))
-
-    # Remove factors with multiplicity > 1
-    sqr_free = div(f, sqr_part)
-
-    # Add one factor of x back in if necessary
-    if min_deg > zero(min_deg)
-        sqr_free *= x_poly(P)
+function div_rem(::Type{Cz}, num::P, den::P)::Tuple{P,P} where {T<:Integer,N,D,Cz<:ZModP{T,N},P<:Polynomial{Cz,D}}
+    iszero(den) && throw(DivideError())
+    q = _rebuild_like(num, Cz, Term{Cz,D}[])
+    r = deepcopy(num)
+    while !iszero(r) && degree(r) >= degree(den)
+        lt_r = leading(r); lt_d = leading(den)
+        t = Term{Cz,D}(lt_r.coeff ÷ lt_d.coeff, lt_r.degree - lt_d.degree)  # exact in Zp
+        q = q + t
+        r = r - (t * den)
     end
+    (trim!(q), trim!(r))
+end
 
-    return sqr_free
+# We can reuse your existing *_mod_p implementations by converting
+# Zp[x] -> BigInt polynomials, calling the old function, then converting back.
+const _Carrier = BigInt
+
+"""
+Returns the factors of f as (g, multiplicity) over Zp[x].
+"""
+function factor(::Type{Cz}, f::P)::Vector{Tuple{P,Int}} where {T<:Integer,N,D,Cz<:ZModP{T,N},P<:Polynomial{Cz,D}}
+    Nmod = _modulus(Cz)
+    f_int = to_int_poly(f, _Carrier)
+    parts_int = factor_mod_p(f_int, Nmod)      # existing code
+    [ (to_zp_poly(fi, Cz), m) for (fi,m) in parts_int ]
 end
 
 """
-Multiplicity of g in f.
+Distinct degree factorization over Zp[x].
 """
-function multiplicity(::Type{C}, f::P, g::P)::Integer where {C,D,P<:Polynomial{C,D}}
-    degree(gcd(C, f, g)) == 0 && return 0
-    return 1 + multiplicity(C, div(f, g), g)
+function dd_factor(::Type{Cz}, f::P)::Array{P} where {T<:Integer,N,D,Cz<:ZModP{T,N},P<:Polynomial{Cz,D}}
+    Nmod = _modulus(Cz)
+    f_int = to_int_poly(f, _Carrier)
+    arr_int = dd_factor_mod_p(f_int, Nmod)     # existing code
+    [ to_zp_poly(g, Cz) for g in arr_int ]
 end
+
+"""
+Distinct degree split over Zp[x].
+"""
+function dd_split(::Type{Cz}, f::P, d::Integer)::Vector{P} where {T<:Integer,N,D,Cz<:ZModP{T,N},P<:Polynomial{Cz,D}}
+    Nmod = _modulus(Cz)
+    f_int = to_int_poly(f, _Carrier)
+    vec_int = dd_split_mod_p(f_int, d, Nmod)   # existing code
+    [ to_zp_poly(g, Cz) for g in vec_int ]
+end
+
+# The following generic helpers from the abstract file will now work automatically:
+#   div(::Type{C}, num, den) = first(div_rem(C, num, den))
+#   rem(::Type{C}, num, den) = last(div_rem(C, num, den))
+#   extended_euclid_alg, gcd, square_free, multiplicity
+# because they only require field ops and div/rem defined above.
+
