@@ -2,31 +2,78 @@
 #############################################################################
 #
 # This file implements polynomial addition for dense polynomials.
-#                                                                               
+#
 #############################################################################
 #############################################################################
 
+# Assumes:
+#   mutable struct PolynomialDense{C,D} <: Polynomial{C,D}
+#       terms :: Vector{Term{C,D}}      # degree = index-1 (ascending), canonical zero as [0*x^0]
+#   end
+# and trim!(::Polynomial{C,D}) is available from the abstract layer.
+
 """
-Add a polynomial and a term.
+Add a dense polynomial and a term (functional).
+Merges at degree = t.degree and trims trailing zeros.
 """
-function +(p::PolynomialDense, t::Term)
-    p = deepcopy(p)
-    if t.degree > degree(p)
-        push!(p, t)
+function Base.:+(p::PolynomialDense{C,D}, t::Term{C,D}) where {C,D}
+    iszero(t) && return p
+    q = deepcopy(p)
+    idx = Int(t.degree) + 1                # array indices are Int
+    if idx > length(q.terms)
+        # grow with zero terms up to idx
+        zt = Term{C,D}(zero(C), zero(D))
+        append!(q.terms, fill(zt, idx - length(q.terms) - 0))
+        push!(q.terms, t)
     else
-        if !iszero(p.terms[t.degree + 1]) #+1 is due to indexing
-            p.terms[t.degree + 1] += t
+        # merge at that slot
+        if !iszero(q.terms[idx])
+            q.terms[idx] = q.terms[idx] + t
         else
-            p.terms[t.degree + 1] = t
+            q.terms[idx] = t
         end
     end
-    trim!(p)
-    return p
+    return trim!(q)
 end
 
-# We won't re-implement any of these functions for dense polynomials, the abstract versions will 
-# produce the correct result.
+# Term + PolynomialDense (commutative)
+Base.:+(t::Term{C,D}, p::PolynomialDense{C,D}) where {C,D} = p + t
 
-# function +(p1::PolynomialDense, p2::PolynomialDense)::PolynomialDense
-# +(p::PolynomialDense, n::Int) = p + Term(n,0)
-# +(n::Int, p::PolynomialDense) = p + Term(n,0)
+"""
+In-place add a term (mutating).
+"""
+function Base.:+=(p::PolynomialDense{C,D}, t::Term{C,D}) where {C,D}
+    iszero(t) && return p
+    idx = Int(t.degree) + 1
+    if idx > length(p.terms)
+        zt = Term{C,D}(zero(C), zero(D))
+        append!(p.terms, fill(zt, idx - length(p.terms) - 0))
+        push!(p.terms, t)
+    else
+        p.terms[idx] = iszero(p.terms[idx]) ? t : (p.terms[idx] + t)
+    end
+    trim!(p)
+end
+
+"""
+Add an integer constant to a dense polynomial.
+(Converts n to coefficient type C and uses degree zero of type D.)
+"""
+Base.:+(p::PolynomialDense{C,D}, n::Integer) where {C,D} =
+    p + Term{C,D}(convert(C, n), zero(D))
+Base.:+(n::Integer, p::PolynomialDense{C,D}) where {C,D} =
+    p + n
+
+# (Optional) If you want a fast dense+dense path (otherwise abstract fallback is fine):
+# function Base.:+(p::PolynomialDense{C,D}, q::PolynomialDense{C,D})::PolynomialDense{C,D} where {C,D}
+#     np, nq = length(p.terms), length(q.terms)
+#     L = max(np, nq)
+#     zt = Term{C,D}(zero(C), zero(D))
+#     vt = Vector{Term{C,D}}(undef, L)
+#     @inbounds for i in 1:L
+#         tp = (i <= np) ? p.terms[i] : zt
+#         tq = (i <= nq) ? q.terms[i] : zt
+#         vt[i] = tp + tq
+#     end
+#     return trim!(PolynomialDense{C,D}(vt))
+# end
