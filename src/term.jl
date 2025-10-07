@@ -39,18 +39,18 @@ end
 """
 Creates the zero term.
 """
-function zero(::Type{Term{C, D}})::Term{C, D} where {C, D} 
+function Base.zero(::Type{Term{C, D}})::Term{C, D} where {C, D} 
     Term(zero(C), zero(D))
 end
-zero(t::Term) = zero(typeof(t))
+Base.zero(t::Term) = zero(typeof(t))
 
 """
 Creates the unit term.
 """
-function one(::Type{Term{C, D}})::Term{C, D} where {C, D}
+function Base.one(::Type{Term{C, D}})::Term{C, D} where {C, D}
     Term(one(C), zero(D))
 end
-one(t::Term) = one(typeof(t))
+Base.one(t::Term) = one(typeof(t))
 
 ###########
 # Display #
@@ -59,7 +59,7 @@ one(t::Term) = one(typeof(t))
 """
 Show a term.
 """
-show(io::IO, t::Term) = print(io, "$(t.coeff)⋅x^$(t.degree)")
+Base.show(io::IO, t::Term) = print(io, "$(t.coeff)⋅x^$(t.degree)")
 
 ########################
 # Queries about a term #
@@ -68,21 +68,22 @@ show(io::IO, t::Term) = print(io, "$(t.coeff)⋅x^$(t.degree)")
 """
 Check if a term is 0.
 """
-iszero(t::Term)::Bool = iszero(t.coeff)
+Base.iszero(t::Term)::Bool = iszero(t.coeff)
 
 """
 Compare two terms (with the same coefficient/degree types).
 """
-function isless(t1::Term{C, D}, t2::Term{C, D})::Bool  where {C, D}
+function Base.isless(t1::Term{C, D}, t2::Term{C, D})::Bool  where {C, D}
     t1.degree == t2.degree ? (t1.coeff < t2.coeff) : (t1.degree < t2.degree)  
 end
 
-function (==)(t1::Term{C, D}, t2::Term{C, D}) where {C, D}
+function Base.:(==)(t1::Term{C, D}, t2::Term{C, D}) where {C, D}
     t1.coeff == t2.coeff && t1.degree == t2.degree
 end
 
 """
 Evaluate a term at a point x.
+Note: if C is ZModP, you should also pass x as ZModP for field evaluation.
 """
 function evaluate(t::Term, x::S) where {S <: Number} 
     t.coeff * x^t.degree
@@ -95,7 +96,7 @@ end
 """
 Add two terms of the same degree (with the same coefficient/degree types).
 """
-function +(t1::Term{C, D},t2::Term{C, D})::Term{C, D} where {C, D}
+function Base.:+(t1::Term{C, D}, t2::Term{C, D})::Term{C, D} where {C, D}
     @assert t1.degree == t2.degree
     Term(t1.coeff + t2.coeff, t1.degree)
 end
@@ -103,45 +104,46 @@ end
 """
 Negate a term.
 """
-function -(t::Term{C, D},)::Term{C, D} where {C, D} 
+function Base.:-(t::Term{C, D},)::Term{C, D} where {C, D} 
     Term(-t.coeff,t.degree)  
 end
 
 """
 Subtract two terms with the same degree (and the same coefficient/degree types).
 """
-function -(t1::Term{C, D}, t2::Term{C, D})::Term{C, D} where {C, D}
+function Base.:-(t1::Term{C, D}, t2::Term{C, D})::Term{C, D} where {C, D}
     t1 + (-t2) 
 end
 
 """
 Multiply two terms (with the same coefficient/degree types).
 """
-function *(t1::Term{C, D}, t2::Term{C, D})::Term{C, D} where {C, D}
+function Base.:*(t1::Term{C, D}, t2::Term{C, D})::Term{C, D} where {C, D}
     Term(t1.coeff * t2.coeff, t1.degree + t2.degree)
 end
 
 """
 Multiply a term by a constant.
 """
-function *(t::Term{C, D}, n::S)::Term{C, D} where {C, D, S <: Integer}
+function Base.:*(t::Term{C, D}, n::S)::Term{C, D} where {C, D, S <: Integer}
     Term(t.coeff * n, t.degree)
 end
-function *(n::S, t::Term{C, D})::Term{C, D} where {C, D, S <: Integer}
+function Base.:*(n::S, t::Term{C, D})::Term{C, D} where {C, D, S <: Integer}
     t * n
 end
 
 """
 Power of a term.
 """
-function ^(t::Term{C, D}, n::S)::Term{C, D} where {C, D, S <: Integer}
+function Base.:^(t::Term{C, D}, n::S)::Term{C, D} where {C, D, S <: Integer}
     Term(t.coeff^n, t.degree*D(n))
 end
 
 """
 Compute the symmetric mod of a term with an integer.
+(Only for integer coefficient types; ZModP should not use this.)
 """
-function mod(t::Term{C, D}, p::Integer)::Term{C, D} where {C <: Integer, D}
+function Base.mod(t::Term{C, D}, p::Integer)::Term{C, D} where {C <: Integer, D}
     Term(mod(t.coeff, p), t.degree)
 end
 
@@ -149,34 +151,47 @@ end
 Compute the derivative of a term.
 """
 function derivative(t::Term{C, D})::Term{C, D} where {C, D}  
-    Term{C, D}(t.coeff*C(t.degree),max(t.degree-one(D),zero(D)))
+    Term{C, D}(t.coeff*C(t.degree), max(t.degree-one(D), zero(D)))
 end
 
 """
 Exact division when the coefficient type `C` is a field (e.g. Zp).
 
-You will need to override this in Task 5 for ZModP specifically.
-Do NOT modify this particular version of the function.
+Default placeholder (will be overridden for ZModP in Task 5).
 """
-function div(t1::Term{C, D}, t2::Term{C, D}) where {C, D} # Base.:÷
+function Base.div(t1::Term{C, D}, t2::Term{C, D}) where {C, D} # Base.:÷
     not_yet_implemented_error(t1, "div")
 end
 
-"""
-Divide two terms (with the same coefficient/degree types). 
-Returns a function of an integer.
+# ---------------------------------------------------------------------------
+# --- Task 5: ZModP support (exact division + div_mod_p via conversion) -----
+# ---------------------------------------------------------------------------
 
-Note: You will need to override this for division where the coefficients are of type ZModP (Task 5)
-There we can do exact division, so we can simply do `t1.coeff ÷ t2.coeff`.
+# Bring the ZModP type into scope (assumes src/z_mod_p.jl defines module ZModPField)
+import .ZModPField: ZModP
+
 """
-function div_mod_p(t1::Term{C, D}, t2::Term{C, D}, prime::Integer) where {C, D}
-    @assert t1.degree ≥ t2.degree
-    new_coeff = mod((mod(t1.coeff, prime) * int_inverse_mod(t2.coeff, prime)), prime)
-    return Term(new_coeff, t1.degree - t2.degree)
+Exact division for terms with ZModP coefficients.
+"""
+function Base.div(t1::Term{ZModP{T,N},D}, t2::Term{ZModP{T,N},D}) where {T<:Integer,N,D}
+    iszero(t2.coeff) && throw(DivideError())
+    Term{ZModP{T,N},D}(t1.coeff ÷ t2.coeff, t1.degree - t2.degree)
 end
 
 """
-Integer divide a term by an integer.
+Refactored div_mod_p: convert to ZModP, divide exactly, convert back.
+"""
+function div_mod_p(t1::Term{C,D}, t2::Term{C,D}, prime::Integer) where {C<:Integer,D}
+    N = Int(prime)
+    Tz = ZModP{C,N}
+    a = Term{Tz,D}(Tz(t1.coeff), t1.degree)
+    b = Term{Tz,D}(Tz(t2.coeff), t2.degree)
+    r = div(a, b)
+    return Term{C,D}(C(r.coeff.val), r.degree)
+end
+
+"""
+Integer divide a term by an integer (helper forwards to the above).
 """
 function div_mod_p(t::Term{C, D}, n::Integer, prime::Integer) where {C <: Integer, D} 
     return div_mod_p(t, Term(C(n), zero(D)), prime)
@@ -187,4 +202,4 @@ end
 #############################
 
 """ Enable broadcasting an operation on a term """
-broadcastable(t::Term) = Ref(t)
+Base.broadcastable(t::Term) = Ref(t)
