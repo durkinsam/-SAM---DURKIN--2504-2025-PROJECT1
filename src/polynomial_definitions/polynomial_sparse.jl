@@ -1,128 +1,130 @@
 #############################################################################
-# PolynomialSparse — parametric sparse representation
-#   • stores ONLY non-zero terms
-#   • terms kept in strictly increasing degree order
-#   • plays with Polynomial{C,D} and Term{C,D}
+# Sparse polynomial operations for PolynomialSparse{C,D}
+# Optimised for:
+#   • p + q         : linear merge in degree order
+#   • p + t (term)  : linear insert/merge
+#   • t * p         : linear map, preserves sorted unique degrees
+# Also provides sparse-aware: mod(·, prime), derivative(·)
 #############################################################################
 
-# bring in the heap (adjust the relative path if your tree differs)
-include(joinpath(@__DIR__, "..", "utils", "heap.jl"))
+# ========== helpers (local; rely only on the sparse representation) ==========
+@inline _iszeroC(::Type{C}, x) where {C} = x == zero(C)
 
-# sparse concrete type
-mutable struct PolynomialSparse{C,D} <: Polynomial{C,D}
-    terms :: Vector{Term{C,D}}   # non-zero terms, ascending degree
-end
-
-# ----------------------------
-# internal helpers
-# ----------------------------
-@inline _iszero_term(t::Term) = iszero(t.coeff)
-
-# normalise: drop zeros, merge equal degrees, sort by degree (asc)
-function _normalize_sparse(v::Vector{Term{C,D}}) where {C,D}
-    # 1) push non-zero terms into a max-heap by degree (desc)
-    # (the MaxHeap in utils/heap.jl accepts a comparator; if your API differs,
-    #  replace the constructor call accordingly.)
-    h = MaxHeap{Term{C,D}}((a,b)->a.degree > b.degree)
-    for t in v
-        _iszero_term(t) && continue
-        push!(h, t)
-    end
-
-    # 2) pop & merge equal degrees while descending
-    out_desc = Term{C,D}[]
-    while !isempty(h)
-        t = pop!(h)
-        if isempty(out_desc) || out_desc[end].degree != t.degree
-            push!(out_desc, t)
+# Merge two ascending-degree term streams into a new term vector
+function _merge_add(ps::Vector{Term{C,D}}, qs::Vector{Term{C,D}}) where {C,D}
+    vt = Term{C,D}[]
+    sizehint!(vt, length(ps) + length(qs))
+    i = 1; j = 1
+    while i <= length(ps) || j <= length(qs)
+        if i > length(ps)
+            push!(vt, qs[j]); j += 1
+        elseif j > length(qs)
+            push!(vt, ps[i]); i += 1
         else
-            s = Term{C,D}(out_desc[end].coeff + t.coeff, t.degree)
-            out_desc[end] = s
-            _iszero_term(s) && pop!(out_desc) # drop if cancels to zero
+            ti = ps[i]; tj = qs[j]
+            if ti.degree == tj.degree
+                c = ti.coeff + tj.coeff
+                iszero(c) || push!(vt, Term{C,D}(c, ti.degree))
+                i += 1; j += 1
+            elseif ti.degree < tj.degree
+                push!(vt, ti); i += 1
+            else
+                push!(vt, tj); j += 1
+            end
         end
     end
-
-    # 3) return ascending degree
-    reverse!(out_desc)
-    return out_desc
+    return vt
 end
 
-# ----------------------------
-# constructors
-# ----------------------------
-# zero polynomial = empty sparse vector
-PolynomialSparse{C,D}() where {C,D} = PolynomialSparse{C,D}(Term{C,D}[])
-
-# from a vector of terms
-function PolynomialSparse{C,D}(v::Vector{Term{C,D}}) where {C,D}
-    PolynomialSparse{C,D}(_normalize_sparse(v))
+# Insert/merge a single term t (ascending degree) into p.terms (ascending)
+function _insert_add(ps::Vector{Term{C,D}}, t::Term{C,D}) where {C,D}
+    iszero(t) && return copy(ps)
+    vt = Term{C,D}[]
+    sizehint!(vt, length(ps) + 1)
+    inserted = false
+    for u in ps
+        if !inserted && t.degree < u.degree
+            push!(vt, t); push!(vt, u); inserted = true
+        elseif !inserted && t.degree == u.degree
+            c = u.coeff + t.coeff
+            iszero(c) || push!(vt, Term{C,D}(c, u.degree))
+            inserted = true
+        else
+            push!(vt, u)
+        end
+    end
+    inserted || push!(vt, t)
+    return vt
 end
 
-# from any iterator of already-typed terms
-PolynomialSparse{C,D}(itr) where {C,D} = PolynomialSparse{C,D}(collect(Term{C,D}, itr))
+# ========== Addition (optimised) ============================================
 
-# infer {C,D} from element type
-PolynomialSparse(v::Vector{Term{C,D}}) where {C,D} = PolynomialSparse{C,D}(v)
-
-# ----------------------------
-# minimal interface (iteration/queries)
-# ----------------------------
-# iterate over non-zero terms (already sparse & ordered)
-Base.iterate(p::PolynomialSparse{C,D}, s::Int=1) where {C,D} =
-    s > length(p.terms) ? nothing : (p.terms[s], s+1)
-
-Base.length(p::PolynomialSparse{C,D}) where {C,D} = length(p.terms)
-
-# smallest-degree term (or 0 if empty)
-function Base.last(p::PolynomialSparse{C,D}) where {C,D}
-    isempty(p.terms) ? Term{C,D}(zero(C), zero(D)) : p.terms[1]
+# p + q  (PolynomialSparse + PolynomialSparse) — linear merge
+function Base.:+(p::PolynomialSparse{C,D}, q::PolynomialSparse{C,D})::PolynomialSparse{C,D} where {C,D}
+    vt = _merge_add(p.terms, q.terms)
+    return PolynomialSparse{C,D}(vt)  # already sparse/ordered
 end
 
-# leading term (or 0 if empty)
-function leading(p::PolynomialSparse{C,D}) where {C,D}
-    isempty(p.terms) ? Term{C,D}(zero(C), zero(D)) : p.terms[end]
+# p + t  (PolynomialSparse + Term) — linear insert/merge
+function Base.:+(p::PolynomialSparse{C,D}, t::Term{C,D})::PolynomialSparse{C,D} where {C,D}
+    vt = _insert_add(p.terms, t)
+    return PolynomialSparse{C,D}(vt)
+end
+Base.:+(t::Term{C,D}, p::PolynomialSparse{C,D}) where {C,D} = p + t
+
+# p + n  (add constant; use degree 0 of type D, coefficient type C)
+Base.:+(p::PolynomialSparse{C,D}, n::Integer) where {C,D} =
+    p + Term{C,D}(convert(C,n), zero(D))
+Base.:+(n::Integer, p::PolynomialSparse{C,D}) where {C,D} = p + n
+
+# ========== Term multiplication (optimised) =================================
+# t * p — map once, keep order (degrees strictly increase so no merging needed)
+function Base.:*(t::Term{C,D}, p::PolynomialSparse{C,D})::PolynomialSparse{C,D} where {C,D}
+    iszero(t) && return PolynomialSparse{C,D}()
+    vt = Term{C,D}[]
+    sizehint!(vt, length(p.terms))
+    @inbounds for u in p.terms
+        iszero(u) && continue
+        c = t.coeff * u.coeff
+        iszero(c) && continue
+        push!(vt, Term{C,D}(c, u.degree + t.degree))
+    end
+    return PolynomialSparse{C,D}(vt)
+end
+Base.:*(p::PolynomialSparse{C,D}, t::Term{C,D}) where {C,D} = t * p
+
+# (optional) scalar-on-either-side
+Base.:*(α::Number, p::PolynomialSparse{C,D}) where {C,D} =
+    (iszero(α) ? PolynomialSparse{C,D}() :
+     PolynomialSparse{C,D}([Term{C,D}(convert(C,α)*u.coeff, u.degree) for u in p.terms]))
+Base.:*(p::PolynomialSparse{C,D}, α::Number) where {C,D} = α * p
+
+# ========== Derivative (sparse-aware) =======================================
+function derivative(p::PolynomialSparse{C,D})::PolynomialSparse{C,D} where {C,D}
+    vt = Term{C,D}[]
+    sizehint!(vt, max(0, length(p.terms)-1))
+    @inbounds for u in p.terms
+        iszero(u.degree) && continue
+        # multiply coefficient by degree (cast degree -> C), then drop degree by 1
+        c = u.coeff * convert(C, u.degree)
+        iszero(c) && continue
+        push!(vt, Term{C,D}(c, u.degree - one(D)))
+    end
+    return PolynomialSparse{C,D}(vt)
 end
 
-# ----------------------------
-# push! / pop! respecting sparsity
-# ----------------------------
-function Base.push!(p::PolynomialSparse{C,D}, t::Term{C,D}) where {C,D}
-    _iszero_term(t) && return p
-    push!(p.terms, t)
-    p.terms = _normalize_sparse(p.terms)
-    p
+# ========== Mod prime (sparse-aware; no indexing) ============================
+# Reduce coefficients modulo a prime (keep non-zero residues only)
+function Base.mod(f::PolynomialSparse{C,D}, p::Int)::PolynomialSparse{C,D} where {C,D}
+    vt = Term{C,D}[]
+    sizehint!(vt, length(f.terms))
+    @inbounds for t in f.terms
+        r = mod(t.coeff, p)
+        iszero(r) || push!(vt, Term{C,D}(convert(C, r), t.degree))
+    end
+    return PolynomialSparse{C,D}(vt)
 end
 
-function Base.pop!(p::PolynomialSparse{C,D})::Term{C,D} where {C,D}
-    isempty(p.terms) && return Term{C,D}(zero(C), zero(D))
-    pop!(p.terms)
-end
-
-# ----------------------------
-# constructors commonly used by the project (sparse-aware)
-# ----------------------------
-Base.zero(::Type{PolynomialSparse{C,D}}) where {C,D} = PolynomialSparse{C,D}()
-Base.one(::Type{PolynomialSparse{C,D}})  where {C,D} =
-    PolynomialSparse{C,D}([Term{C,D}(one(C), zero(D))])
-
-# x
-function x_poly(::Type{PolynomialSparse{C,D}})::PolynomialSparse{C,D} where {C,D}
-    PolynomialSparse{C,D}([Term{C,D}(one(C), one(D))])
-end
-
-# x^p - x
-function cyclotonic_polynomial(::Type{PolynomialSparse{C,D}}, p::Integer)::PolynomialSparse{C,D} where {C,D}
-    PolynomialSparse{C,D}([
-        Term{C,D}(one(C), convert(D,p)),
-        Term{C,D}(-one(C), zero(D))
-    ])
-end
-
-# x - n
-function linear_monic_polynomial(::Type{PolynomialSparse{C,D}}, n)::PolynomialSparse{C,D} where {C,D}
-    PolynomialSparse{C,D}([
-        Term{C,D}(one(C), one(D)),
-        Term{C,D}(-convert(C,n), zero(D))
-    ])
-end
-
+# ========== Equality fast path (vector compare is fine) ======================
+Base.:(==)(p::PolynomialSparse{C,D}, q::PolynomialSparse{C,D}) where {C,D} =
+    p.terms == q.terms
